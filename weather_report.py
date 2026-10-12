@@ -49,14 +49,23 @@ class Current_Weather_Units(BaseModel):
     is_day: str
     weathercode: str
 
-class Current_Weather(BaseModel):
+class Current_Weather(SQLModel, table=True):
+    __tablename__ = "weather_history"
+
+    # Add a database primary key id that isn't required in the API payload
+    id: int | None = Field(default=None, primary_key=True)
+    created_at: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
+
+    # The 3 specific fields requested (Validated and stored)
     temperature: float
     windspeed: float
     winddirection: int
-    time: str
-    interval: int
-    is_day: int
-    weathercode: str
+
+    # Fields present in payload but ignored by database columns (sa_column=None)
+    time: str = Field(sa_column=None)
+    interval: int = Field(sa_column=None)
+    is_day: int = Field(sa_column=None)
+    weathercode: int = Field(sa_column=None)
 
 class Weather(BaseModel):
     latitude: float
@@ -69,6 +78,16 @@ class Weather(BaseModel):
     current_weather_units: Current_Weather_Units
     current_weather: Current_Weather
 
+
+# ==========================================================
+# Database Configuration
+# ==========================================================
+DATABASE_URL = "sqlite:///./weather_sqlmodel.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+def init_db():
+    """Builds the SQLite table layout out-of-the-box"""
+    SQLModel.metadata.create_all(engine)
 
 # =================================================
 # This is what runs the process
@@ -86,6 +105,25 @@ def main():
     except ValidationError as e:
         print("Validation failed:", e.json())
 
+    # Save directly to the local SQLite file
+    init_db()
+    try:
+        db_record = weather_report.current_weather
+        with Session(engine) as session:
+            session.add(db_record)
+            session.commit()
+            print(f"💾 Saved to SQLite via SQLModel -> Temp: {db_record.temperature}, Wind: {db_record.windspeed}")
+    except Exception as e:
+        print(f"❌ Pipeline processing failed: {e}")
+        print("=" * 20, "\n", weather_report.current_weather, "\n", "+" * 20)
+        print(type(weather_report.current_weather)) #<class '__main__.Current_Weather'
 
+
+def print_db():
+    with Session(engine) as session:
+        records = session.exec(select(Current_Weather)).all()
+        for record in records:
+            print(record)
 if __name__ == "__main__":
     main()
+    print_db()
